@@ -18,6 +18,7 @@ import {
 import { Question } from '../types.ts';
 import { DEFAULT_INITIAL_QUESTIONS, PRESET_CATEGORIES } from '../data/presetQuestions.ts';
 import { PreviewQuizModal } from './PreviewQuizModal.tsx';
+import { safeFetchJson } from '../utils/api.ts';
 
 interface CreateQuizViewProps {
   onPublishSuccess: (data: { shareCode: string; managementToken: string; title: string; questionsCount: number }) => void;
@@ -152,7 +153,12 @@ export const CreateQuizView: React.FC<CreateQuizViewProps> = ({ onPublishSuccess
     setErrorMessage(null);
 
     try {
-      const response = await fetch('/api/quizzes', {
+      const { ok, data, error } = await safeFetchJson<{
+        success: boolean;
+        shareCode: string;
+        managementToken: string;
+        error?: string;
+      }>('/api/quizzes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -166,10 +172,8 @@ export const CreateQuizView: React.FC<CreateQuizViewProps> = ({ onPublishSuccess
         }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'Failed to publish quiz');
+      if (!ok || !data?.success) {
+        throw new Error(error || data?.error || 'Failed to publish quiz. Please try again.');
       }
 
       onPublishSuccess({
@@ -180,7 +184,7 @@ export const CreateQuizView: React.FC<CreateQuizViewProps> = ({ onPublishSuccess
       });
     } catch (err: any) {
       console.error('Publish error:', err);
-      setErrorMessage(err.message || 'Network error while publishing. Please try again.');
+      setErrorMessage(err.message || 'Unable to publish quiz. Please try again in a moment.');
     } finally {
       setIsPublishing(false);
     }
@@ -443,10 +447,20 @@ export const CreateQuizView: React.FC<CreateQuizViewProps> = ({ onPublishSuccess
           <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex items-center gap-2.5 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs sm:text-sm font-medium"
+            className="flex items-center justify-between gap-3 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs sm:text-sm font-medium shadow-lg"
           >
-            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-            <span>{errorMessage}</span>
+            <div className="flex items-center gap-2.5 min-w-0">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span className="break-words">{errorMessage}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => handlePublish()}
+              disabled={isPublishing}
+              className="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/30 text-xs font-semibold shrink-0 cursor-pointer transition-all"
+            >
+              Retry
+            </button>
           </motion.div>
         )}
 

@@ -3,7 +3,6 @@ import { AnimatePresence, motion } from 'motion/react';
 import { ActiveView, PlatformStats, SavedCreatorQuiz } from './types.ts';
 import { DreamyBackground } from './components/DreamyBackground.tsx';
 import { Navbar } from './components/Navbar.tsx';
-import { FloatingNotifications } from './components/FloatingNotifications.tsx';
 import { LandingView } from './components/LandingView.tsx';
 import { CreateQuizView } from './components/CreateQuizView.tsx';
 import { PublishSuccessView } from './components/PublishSuccessView.tsx';
@@ -13,6 +12,7 @@ import { AnswerCodeModal } from './components/AnswerCodeModal.tsx';
 import { MyQuizzesDrawer } from './components/MyQuizzesDrawer.tsx';
 import { DatabaseStatusModal } from './components/DatabaseStatusModal.tsx';
 import { getSavedCreatorQuizzes, saveCreatorQuiz } from './utils/storage.ts';
+import { safeFetchJson } from './utils/api.ts';
 
 export default function App() {
   // Parse URL on initial mount
@@ -58,9 +58,8 @@ export default function App() {
   // Fetch real statistics from database
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch('/api/stats');
-      const data = await res.json();
-      if (data && data.success) {
+      const { ok, data } = await safeFetchJson<PlatformStats & { success: boolean }>('/api/stats');
+      if (ok && data && data.success) {
         setStats({
           totalQuizzes: data.totalQuizzes,
           totalResponses: data.totalResponses,
@@ -271,9 +270,6 @@ export default function App() {
           )}
         </AnimatePresence>
       </main>
-
-      {/* Floating Social Proof Notifications */}
-      <FloatingNotifications />
 
       {/* Answer Modal */}
       {showAnswerModal && (

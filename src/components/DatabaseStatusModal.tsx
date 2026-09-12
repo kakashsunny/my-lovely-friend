@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { X, Database, CheckCircle2, AlertTriangle, RefreshCw, ExternalLink, ShieldCheck } from 'lucide-react';
 import { DatabaseStatusInfo } from '../types.ts';
+import { safeFetchJson } from '../utils/api.ts';
 
 interface DatabaseStatusModalProps {
   onClose: () => void;
@@ -20,12 +21,11 @@ export const DatabaseStatusModal: React.FC<DatabaseStatusModalProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/db-status');
-      const data = await res.json();
-      if (data && data.success) {
+      const { ok, data, error: fetchErr } = await safeFetchJson<DatabaseStatusInfo & { success: boolean; error?: string }>('/api/db-status');
+      if (ok && data && data.success) {
         setStatus(data);
       } else {
-        setError(data?.error || 'Failed to fetch database status');
+        setError(fetchErr || data?.error || 'Failed to fetch database status');
       }
     } catch (err: any) {
       setError(err?.message || 'Network error fetching status');
@@ -38,13 +38,12 @@ export const DatabaseStatusModal: React.FC<DatabaseStatusModalProps> = ({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/db/retry', { method: 'POST' });
-      const data = await res.json();
-      if (data && data.status) {
+      const { ok, data, error: retryErr } = await safeFetchJson<{ success: boolean; status?: DatabaseStatusInfo; error?: string }>('/api/db/retry', { method: 'POST' });
+      if (ok && data && data.status) {
         setStatus(data.status);
         onRefreshStats();
       } else {
-        setError(data?.error || 'Reconnection attempt failed');
+        setError(retryErr || data?.error || 'Reconnection attempt failed');
       }
     } catch (err: any) {
       setError(err?.message || 'Failed to trigger reconnect');

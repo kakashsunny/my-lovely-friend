@@ -315,6 +315,26 @@ async function startServer() {
     }
   });
 
+  // Explicit JSON 404 handler for any unmatched /api/* routes so they never fall through to HTML/Vite
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({
+      success: false,
+      error: `API route not found: ${req.method} ${req.originalUrl}`,
+    });
+  });
+
+  // Global JSON error handler for /api
+  app.use('/api', (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error('[Bestie API Error]:', err);
+    if (res.headersSent) {
+      return next(err);
+    }
+    res.status(err.status || 500).json({
+      success: false,
+      error: err.message || 'An unexpected server error occurred',
+    });
+  });
+
   // Serve public static assets (favicons, manifest, etc.)
   app.use(express.static(path.join(process.cwd(), 'public')));
 

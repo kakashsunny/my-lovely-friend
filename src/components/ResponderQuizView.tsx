@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { QuizPublic } from '../types.ts';
 import { validateAnswer, ValidationResult } from '../utils/answerValidator.ts';
+import { safeFetchJson } from '../utils/api.ts';
 
 interface ResponderQuizViewProps {
   shareCode: string;
@@ -52,10 +53,11 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
       setIsLoading(true);
       setFetchError(null);
       try {
-        const res = await fetch(`/api/quizzes/${encodeURIComponent(shareCode)}`);
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || 'Quiz not found');
+        const { ok, data, error } = await safeFetchJson<{ success: boolean; quiz: QuizPublic; error?: string }>(
+          `/api/quizzes/${encodeURIComponent(shareCode)}`
+        );
+        if (!ok || !data?.success || !data.quiz) {
+          throw new Error(error || data?.error || 'Quiz not found');
         }
         if (isMounted) {
           setQuiz(data.quiz);
@@ -174,7 +176,12 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
         answerText: answers[q.id] || '',
       }));
 
-      const res = await fetch(`/api/quizzes/${encodeURIComponent(shareCode)}/responses`, {
+      const { ok, data, error, questionId: errQId } = await safeFetchJson<{
+        success: boolean;
+        error?: string;
+        questionId?: string;
+        reason?: string;
+      }>(`/api/quizzes/${encodeURIComponent(shareCode)}/responses`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -183,17 +190,17 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        if (data.questionId) {
-          const targetIndex = quiz.questions.findIndex((q) => q.id === data.questionId);
+      if (!ok || !data?.success) {
+        const targetQId = errQId || data?.questionId;
+        if (targetQId) {
+          const targetIndex = quiz.questions.findIndex((q) => q.id === targetQId);
           if (targetIndex !== -1) {
             setCurrentQIndex(targetIndex);
             setStep('questions');
             triggerShake();
           }
         }
-        throw new Error(data.error || 'Failed to submit responses');
+        throw new Error(error || data?.error || 'Failed to submit responses. Please try again.');
       }
 
       setStep('sent');

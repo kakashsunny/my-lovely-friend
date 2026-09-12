@@ -18,6 +18,7 @@ import {
 import { QuizManagementData, QuizResponse } from '../types.ts';
 import { timeAgo, removeSavedCreatorQuiz } from '../utils/storage.ts';
 import { ResponseDetailModal } from './ResponseDetailModal.tsx';
+import { safeFetchJson } from '../utils/api.ts';
 
 interface ManagementViewProps {
   managementToken: string;
@@ -48,11 +49,15 @@ export const ManagementView: React.FC<ManagementViewProps> = ({
     setErrorMessage(null);
 
     try {
-      const res = await fetch(`/api/quizzes/manage/${encodeURIComponent(managementToken)}`);
-      const data = await res.json();
+      const { ok, data, error } = await safeFetchJson<{
+        success: boolean;
+        quiz: QuizManagementData;
+        responses: QuizResponse[];
+        error?: string;
+      }>(`/api/quizzes/manage/${encodeURIComponent(managementToken)}`);
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to load quiz responses');
+      if (!ok || !data?.success) {
+        throw new Error(error || data?.error || 'Failed to load quiz responses');
       }
 
       setQuiz(data.quiz);
@@ -85,37 +90,35 @@ export const ManagementView: React.FC<ManagementViewProps> = ({
 
   const handleDeleteResponse = async (responseId: string) => {
     try {
-      const res = await fetch(
+      const { ok, data, error } = await safeFetchJson<{ success: boolean; error?: string }>(
         `/api/quizzes/manage/${encodeURIComponent(managementToken)}/responses/${encodeURIComponent(
           responseId
         )}`,
         { method: 'DELETE' }
       );
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to delete response');
+      if (!ok || !data?.success) {
+        throw new Error(error || data?.error || 'Failed to delete response');
       }
       setResponses((prev) => prev.filter((r) => r._id !== responseId));
     } catch (err: any) {
-      alert(err.message || 'Error deleting response');
+      setErrorMessage(err.message || 'Error deleting response');
     }
   };
 
   const handleDeleteQuiz = async () => {
     setIsDeletingQuiz(true);
     try {
-      const res = await fetch(`/api/quizzes/manage/${encodeURIComponent(managementToken)}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to delete quiz');
+      const { ok, data, error } = await safeFetchJson<{ success: boolean; error?: string }>(
+        `/api/quizzes/manage/${encodeURIComponent(managementToken)}`,
+        { method: 'DELETE' }
+      );
+      if (!ok || !data?.success) {
+        throw new Error(error || data?.error || 'Failed to delete quiz');
       }
       removeSavedCreatorQuiz(managementToken);
-      alert('Quiz and all responses have been deleted.');
       onGoHome();
     } catch (err: any) {
-      alert(err.message || 'Error deleting quiz');
+      setErrorMessage(err.message || 'Error deleting quiz');
       setIsDeletingQuiz(false);
     }
   };
