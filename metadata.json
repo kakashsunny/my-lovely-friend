@@ -1,0 +1,6 @@
+{
+  "name": "Bestie",
+  "description": "A dreamy, no-login friendship quiz app where friends test how well they really know each other.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,136 @@
+{
+  "quizzes": [
+    {
+      "_id": "q_6fd1fb5f-6e0",
+      "title": "How Well Do You Know Akash? 💜",
+      "questions": [
+        {
+          "id": "q1",
+          "text": "What is my dream car? 🚗",
+          "position": 1,
+          "required": true
+        },
+        {
+          "id": "q2",
+          "text": "Who is your crush? 👀",
+          "position": 2,
+          "required": true
+        },
+        {
+          "id": "q3",
+          "text": "One message for me 💌",
+          "position": 3,
+          "required": true
+        }
+      ],
+      "shareCode": "CKoKEWr",
+      "managementTokenHash": "053b5c491a2839897e3033ce0d731951fbf8f882ba17995a009fba870b988518",
+      "createdAt": "2026-09-12T07:20:46.676Z",
+      "updatedAt": "2026-09-12T07:20:46.676Z"
+    },
+    {
+      "_id": "q_adb364cf-e3e",
+      "title": "How Well Do You Know Me? 💜",
+      "questions": [
+        {
+          "id": "q_1_1789198443629",
+          "text": "What’s your favourite car? 🚗",
+          "position": 1,
+          "required": true
+        },
+        {
+          "id": "q_2_1789198443629",
+          "text": "What’s your biggest dream? 🌎",
+          "position": 2,
+          "required": true
+        },
+        {
+          "id": "q_3_1789198443629",
+          "text": "Who is your bestie? 🫂",
+          "position": 3,
+          "required": true
+        },
+        {
+          "id": "q_4_1789198443629",
+          "text": "Who is your crush? 👀",
+          "position": 4,
+          "required": true
+        },
+        {
+          "id": "q_5_1789198443629",
+          "text": "What makes you happiest? 🥹",
+          "position": 5,
+          "required": true
+        },
+        {
+          "id": "q_6_1789198443629",
+          "text": "What is your biggest fear? 🫣",
+          "position": 6,
+          "required": true
+        },
+        {
+          "id": "q_7_1789198443629",
+          "text": "What would you do with ₹1 crore? 💰",
+          "position": 7,
+          "required": true
+        },
+        {
+          "id": "q_8_1789198443629",
+          "text": "Write one message for me. 💌",
+          "position": 8,
+          "required": true
+        },
+        {
+          "id": "q_9_1789198443629",
+          "text": "What’s our funniest memory together? 😂",
+          "position": 9,
+          "required": true
+        },
+        {
+          "id": "q_10_1789198443629",
+          "text": "What’s my comfort food or midnight craving? 🍜",
+          "position": 10,
+          "required": true
+        },
+        {
+          "id": "q_11_1789198443629",
+          "text": "What was your first impression of me? ✨",
+          "position": 11,
+          "required": true
+        },
+        {
+          "id": "q_12_1789198443629",
+          "text": "If we could go on a spontaneous trip tomorrow, where are we heading? ✈️",
+          "position": 12,
+          "required": true
+        }
+      ],
+      "shareCode": "pNRbHZR",
+      "managementTokenHash": "bc5caa2960e3295bc184d5f620662709c14b3ee2c5623ff0630f1f49162681ed",
+      "createdAt": "2026-09-12T07:34:33.184Z",
+      "updatedAt": "2026-09-12T07:34:33.184Z"
+    }
+  ],
+  "responses": [
+    {
+      "_id": "resp_9e9a868b-891",
+      "quizId": "q_6fd1fb5f-6e0",
+      "responderName": "Maya ✨",
+      "answers": [
+        {
+          "questionId": "q1",
+          "answerText": "BMW M4"
+        },
+        {
+          "questionId": "q2",
+          "answerText": "Nobody 😭"
+        },
+        {
+          "questionId": "q3",
+          "answerText": "You are my best friend!"
+        }
+      ],
+      "submittedAt": "2026-09-12T07:20:46.688Z"
+    }
+  ]
+}
