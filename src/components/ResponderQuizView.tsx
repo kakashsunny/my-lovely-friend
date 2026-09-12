@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import confetti from 'canvas-confetti';
 import {
@@ -14,6 +14,7 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { QuizPublic } from '../types.ts';
+import { validateAnswer, ValidationResult } from '../utils/answerValidator.ts';
 
 interface ResponderQuizViewProps {
   shareCode: string;
@@ -89,14 +90,33 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
     setCurrentQIndex(0);
   };
 
+  // State for tactile validation feedback & refs
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [isShaking, setIsShaking] = useState(false);
+  const [showAttemptWarning, setShowAttemptWarning] = useState(false);
+
+  const triggerShake = () => {
+    setIsShaking(true);
+    setShowAttemptWarning(true);
+    setTimeout(() => setIsShaking(false), 500);
+  };
+
   // Current question helpers
   const currentQuestion = quiz?.questions[currentQIndex];
   const currentAnswer = currentQuestion ? answers[currentQuestion.id] || '' : '';
-  const isAnswerNonEmpty = currentAnswer.trim().length > 0;
   const totalQuestions = quiz?.questions.length || 0;
+
+  // Real-time Context-Aware Smart Validation for current question
+  const currentValidation: ValidationResult = useMemo(() => {
+    if (!currentQuestion) return { isValid: false };
+    return validateAnswer(currentQuestion.text, currentAnswer);
+  }, [currentQuestion, currentAnswer]);
+
+  const isAnswerValid = currentValidation.isValid;
 
   const handleSetCurrentAnswer = (text: string) => {
     if (!currentQuestion) return;
+    setShowAttemptWarning(false);
     setAnswers((prev) => ({
       ...prev,
       [currentQuestion.id]: text,
@@ -104,7 +124,13 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
   };
 
   const handleNextQuestion = () => {
-    if (!isAnswerNonEmpty) return; // Prevent advancing if empty
+    if (!currentQuestion) return;
+    if (!isAnswerValid) {
+      triggerShake();
+      textareaRef.current?.focus();
+      return;
+    }
+    setShowAttemptWarning(false);
     if (currentQIndex < totalQuestions - 1) {
       setCurrentQIndex((prev) => prev + 1);
     } else {
@@ -113,6 +139,7 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
   };
 
   const handlePrevQuestion = () => {
+    setShowAttemptWarning(false);
     if (currentQIndex > 0) {
       setCurrentQIndex((prev) => prev - 1);
     } else {
@@ -125,6 +152,21 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
     if (!quiz) return;
     setIsSubmitting(true);
     setSubmitError(null);
+
+    // Frontend pre-flight validation
+    for (let i = 0; i < quiz.questions.length; i++) {
+      const q = quiz.questions[i];
+      const a = answers[q.id] || '';
+      const v = validateAnswer(q.text, a);
+      if (!v.isValid) {
+        setCurrentQIndex(i);
+        setStep('questions');
+        triggerShake();
+        setSubmitError(`Question #${i + 1} needs a real answer bestie! 👀`);
+        setIsSubmitting(false);
+        return;
+      }
+    }
 
     try {
       const formattedAnswers = quiz.questions.map((q) => ({
@@ -143,6 +185,14 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
 
       const data = await res.json();
       if (!res.ok || !data.success) {
+        if (data.questionId) {
+          const targetIndex = quiz.questions.findIndex((q) => q.id === data.questionId);
+          if (targetIndex !== -1) {
+            setCurrentQIndex(targetIndex);
+            setStep('questions');
+            triggerShake();
+          }
+        }
         throw new Error(data.error || 'Failed to submit responses');
       }
 
@@ -322,42 +372,77 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
                 {currentQuestion.text}
               </h2>
 
-              {/* Large Text Input */}
-              <div className="space-y-2">
-                <textarea
-                  id={`input-answer-${currentQIndex + 1}`}
-                  rows={3}
-                  value={currentAnswer}
-                  onChange={(e) => handleSetCurrentAnswer(e.target.value)}
-                  onKeyDown={(e) => {
-                    // Enter without Shift submits to next question if non-empty
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      if (isAnswerNonEmpty) {
-                        handleNextQuestion();
+              {/* Large Text Input with Tactile Validation */}
+              <div className="space-y-2.5">
+                <motion.div
+                  animate={isShaking ? { x: [-8, 8, -6, 6, -3, 3, 0] } : {}}
+                  transition={{ duration: 0.4 }}
+                >
+                  <textarea
+                    ref={textareaRef}
+                    id={`input-answer-${currentQIndex + 1}`}
+                    rows={3}
+                    value={currentAnswer}
+                    onChange={(e) => handleSetCurrentAnswer(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (isAnswerValid) {
+                          handleNextQuestion();
+                        } else {
+                          triggerShake();
+                        }
                       }
-                    }
-                  }}
-                  placeholder="Type your answer…"
-                  className="w-full px-5 py-4 rounded-2xl bg-slate-950/90 border border-purple-500/30 focus:border-pink-500 focus:ring-2 focus:ring-pink-500/30 text-base sm:text-lg text-white placeholder-purple-300/40 outline-none transition-all resize-none shadow-inner"
-                />
+                    }}
+                    placeholder="Type your answer…"
+                    className={`w-full px-5 py-4 rounded-2xl bg-slate-950/90 border text-base sm:text-lg text-white placeholder-purple-300/40 outline-none transition-all resize-none shadow-inner ${
+                      currentAnswer.trim().length > 0 && !isAnswerValid
+                        ? 'border-pink-500/70 focus:border-pink-400 focus:ring-2 focus:ring-pink-500/30'
+                        : isAnswerValid
+                        ? 'border-emerald-500/50 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-500/20'
+                        : 'border-purple-500/30 focus:border-pink-500 focus:ring-2 focus:ring-pink-500/30'
+                    }`}
+                  />
+                </motion.div>
 
-                {/* Real-time Validation Status */}
-                <div className="flex items-center justify-between text-xs px-1">
-                  {!isAnswerNonEmpty ? (
-                    <span className="text-pink-400/90 font-medium flex items-center gap-1">
-                      <span>👀 You gotta answer this one!</span>
-                    </span>
+                {/* Real-time Context-Aware Validation Status */}
+                <div className="min-h-[26px]">
+                  {currentAnswer.trim().length === 0 ? (
+                    <div className="flex items-center justify-between text-xs px-1 text-purple-300/60 font-medium">
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-pink-400 animate-pulse" />
+                        <span>👀 Type your real answer bestie...</span>
+                      </span>
+                      <span className="hidden sm:inline text-[11px] text-purple-400/50">
+                        No skips allowed ✨
+                      </span>
+                    </div>
+                  ) : !isAnswerValid ? (
+                    <motion.div
+                      key={currentValidation.message}
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl bg-pink-500/15 border border-pink-500/40 text-pink-200 text-xs font-semibold shadow-sm"
+                    >
+                      <AlertCircle className="w-4 h-4 text-pink-400 shrink-0" />
+                      <span>{currentValidation.message || '👀 Give me a real answer bestie!'}</span>
+                    </motion.div>
                   ) : (
-                    <span className="text-emerald-400 font-medium flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Ready to continue</span>
-                    </span>
-                  )}
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex items-center justify-between text-xs px-1"
+                    >
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1.5">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span>Ready to continue ✨</span>
+                      </span>
 
-                  <span className="hidden sm:inline text-purple-300/50">
-                    Press <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-[10px]">Enter ↵</kbd> to advance
-                  </span>
+                      <span className="hidden sm:inline text-purple-300/50">
+                        Press <kbd className="px-1.5 py-0.5 rounded bg-white/10 text-[10px]">Enter ↵</kbd> to advance
+                      </span>
+                    </motion.div>
+                  )}
                 </div>
               </div>
 
@@ -377,11 +462,10 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
                   id="btn-question-next"
                   type="button"
                   onClick={handleNextQuestion}
-                  disabled={!isAnswerNonEmpty}
                   className={`flex-1 flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl font-bold text-sm sm:text-base shadow-xl transition-all cursor-pointer ${
-                    isAnswerNonEmpty
+                    isAnswerValid
                       ? 'bg-gradient-to-r from-pink-500 via-purple-600 to-indigo-600 hover:from-pink-400 hover:to-indigo-500 text-white shadow-pink-500/30 hover:shadow-pink-500/50 transform hover:-translate-y-0.5'
-                      : 'bg-slate-800/50 text-slate-500 border border-white/5 cursor-not-allowed opacity-60'
+                      : 'bg-slate-800/60 text-purple-300/40 border border-white/5 cursor-pointer opacity-70 hover:border-pink-500/30'
                   }`}
                 >
                   <span>
@@ -415,37 +499,55 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
             </p>
           </div>
 
-          {/* Review Answers Summary */}
-          <div className="max-h-[320px] overflow-y-auto space-y-2.5 pr-1">
-            {quiz.questions.map((q, idx) => (
-              <div
-                key={q.id}
-                className="p-3.5 rounded-2xl bg-slate-950/70 border border-white/10 flex items-start justify-between gap-3 text-left"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs text-purple-300/80 font-medium">
-                    {idx + 1}. {q.text}
-                  </p>
-                  <p className="text-sm font-semibold text-pink-200 mt-1 break-words">
-                    {answers[q.id] || '—'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    setCurrentQIndex(idx);
-                    setStep('questions');
-                  }}
-                  className="text-xs text-purple-400 hover:text-white px-2 py-1 rounded-lg hover:bg-white/5 transition-colors shrink-0"
+          {/* Review Answers Summary with Validation Status */}
+          <div className="max-h-[340px] overflow-y-auto space-y-2.5 pr-1">
+            {quiz.questions.map((q, idx) => {
+              const qVal = validateAnswer(q.text, answers[q.id] || '');
+              return (
+                <div
+                  key={q.id}
+                  className={`p-3.5 rounded-2xl border transition-all text-left flex items-start justify-between gap-3 ${
+                    qVal.isValid
+                      ? 'bg-slate-950/70 border-white/10'
+                      : 'bg-rose-950/30 border-rose-500/50 ring-1 ring-rose-500/30'
+                  }`}
                 >
-                  Edit
-                </button>
-              </div>
-            ))}
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <p className="text-xs text-purple-300/80 font-medium">
+                      {idx + 1}. {q.text}
+                    </p>
+                    <p className="text-sm font-semibold text-pink-200 break-words">
+                      {answers[q.id] || '—'}
+                    </p>
+                    {!qVal.isValid && (
+                      <p className="text-xs font-medium text-rose-300 flex items-center gap-1.5 pt-0.5">
+                        <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        <span>{qVal.message || 'Needs a real answer bestie!'}</span>
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => {
+                      setCurrentQIndex(idx);
+                      setStep('questions');
+                    }}
+                    className={`text-xs px-3 py-1.5 rounded-xl font-semibold transition-all shrink-0 cursor-pointer ${
+                      qVal.isValid
+                        ? 'text-purple-300 hover:text-white hover:bg-white/10'
+                        : 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 shadow-sm'
+                    }`}
+                  >
+                    {qVal.isValid ? 'Edit' : 'Fix Answer ✏️'}
+                  </button>
+                </div>
+              );
+            })}
           </div>
 
           {submitError && (
-            <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs text-center">
-              {submitError}
+            <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs text-center flex items-center justify-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <span>{submitError}</span>
             </div>
           )}
 
@@ -460,24 +562,53 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
               ← Back
             </button>
 
-            <button
-              id="btn-submit-answers"
-              onClick={handleSubmitAnswers}
-              disabled={isSubmitting}
-              className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-600 to-indigo-600 hover:from-pink-400 hover:to-indigo-500 text-white font-bold text-base shadow-xl shadow-pink-500/30 hover:shadow-pink-500/50 transition-all cursor-pointer disabled:opacity-50"
-            >
-              {isSubmitting ? (
-                <>
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Sending answers...</span>
-                </>
-              ) : (
-                <>
-                  <Send className="w-4 h-4" />
-                  <span>💌 Submit Answers</span>
-                </>
-              )}
-            </button>
+            {(() => {
+              const allValid = quiz.questions.every(
+                (q) => validateAnswer(q.text, answers[q.id] || '').isValid
+              );
+              return (
+                <button
+                  id="btn-submit-answers"
+                  onClick={() => {
+                    if (!allValid) {
+                      const firstInvalid = quiz.questions.findIndex(
+                        (q) => !validateAnswer(q.text, answers[q.id] || '').isValid
+                      );
+                      if (firstInvalid !== -1) {
+                        setCurrentQIndex(firstInvalid);
+                        setStep('questions');
+                        triggerShake();
+                      }
+                      return;
+                    }
+                    handleSubmitAnswers();
+                  }}
+                  disabled={isSubmitting}
+                  className={`flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-bold text-base shadow-xl transition-all cursor-pointer ${
+                    allValid
+                      ? 'bg-gradient-to-r from-pink-500 via-purple-600 to-indigo-600 hover:from-pink-400 hover:to-indigo-500 text-white shadow-pink-500/30 hover:shadow-pink-500/50'
+                      : 'bg-slate-800/80 text-rose-300/80 border border-rose-500/30 hover:border-rose-500/60'
+                  } disabled:opacity-50`}
+                >
+                  {isSubmitting ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Sending answers...</span>
+                    </>
+                  ) : !allValid ? (
+                    <>
+                      <AlertCircle className="w-4 h-4 text-rose-400" />
+                      <span>Fix Answers to Submit 👀</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>💌 Submit Answers</span>
+                    </>
+                  )}
+                </button>
+              );
+            })()}
           </div>
         </motion.div>
       )}

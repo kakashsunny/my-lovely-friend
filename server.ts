@@ -9,6 +9,7 @@ import {
   hashToken,
   QuestionDoc
 } from './server/db.ts';
+import { validateAnswer } from './src/utils/answerValidator.ts';
 
 dotenv.config();
 
@@ -185,11 +186,11 @@ async function startServer() {
         return res.status(400).json({ error: 'Answers must be provided' });
       }
 
-      // Validate all required questions are answered with non-empty text
-      // Any text like "Nobody", "Secret", "No one", etc. is completely valid.
+      // Validate every answer with Smart Context-Aware Validation
       const answerMap = new Map<string, string>();
       for (const ans of answers) {
         if (ans && typeof ans.questionId === 'string' && typeof ans.answerText === 'string') {
+          // Store raw answer text (trimmed of external wrapping space, but preserving original content)
           answerMap.set(ans.questionId, ans.answerText.trim());
         }
       }
@@ -197,19 +198,24 @@ async function startServer() {
       const formattedAnswers: Array<{ questionId: string; answerText: string }> = [];
 
       for (const q of quiz.questions) {
-        const text = answerMap.get(q.id);
-        if (q.required && (!text || text.length === 0)) {
+        const rawText = answerMap.get(q.id) || '';
+
+        // Run smart context-aware validation against question text
+        const validation = validateAnswer(q.text, rawText);
+        if (!validation.isValid) {
           return res.status(400).json({
-            error: `Please answer question: "${q.text}"`,
+            error: validation.message || '👀 Give me a real answer bestie!',
             questionId: q.id,
+            questionText: q.text,
+            reason: validation.reason,
           });
         }
-        if (text && text.length > 0) {
-          formattedAnswers.push({
-            questionId: q.id,
-            answerText: text,
-          });
-        }
+
+        // Store original answer exactly as submitted after passing validation
+        formattedAnswers.push({
+          questionId: q.id,
+          answerText: rawText,
+        });
       }
 
       const responseDoc = await db.createResponse({
@@ -308,6 +314,9 @@ async function startServer() {
       res.status(500).json({ error: 'Failed to delete quiz' });
     }
   });
+
+  // Serve public static assets (favicons, manifest, etc.)
+  app.use(express.static(path.join(process.cwd(), 'public')));
 
   // Vite middleware for development & static serving for production
   if (process.env.NODE_ENV !== 'production') {
