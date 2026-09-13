@@ -19,26 +19,40 @@ export default function App() {
   const parseUrl = (): ActiveView => {
     const path = window.location.pathname;
     const params = new URLSearchParams(window.location.search);
+    const hash = window.location.hash;
 
-    // Check shareCode in path /q/:code or param ?q=
+    // Helper to sanitize extracted code/token
+    const clean = (val: string) => decodeURIComponent(val).trim().replace(/\/+$/, '');
+
+    // Check shareCode in path /q/:code or param ?q= or hash #/q/:code
     if (path.startsWith('/q/')) {
-      const code = path.replace('/q/', '').trim();
+      const code = clean(path.replace(/^\/q\//, ''));
       if (code) return { type: 'answer', shareCode: code };
     }
-    if (params.get('q')) {
-      return { type: 'answer', shareCode: params.get('q')!.trim() };
+    if (hash.startsWith('#/q/')) {
+      const code = clean(hash.replace(/^#\/q\//, '').split('?')[0]);
+      if (code) return { type: 'answer', shareCode: code };
+    }
+    if (params.get('q') || params.get('code')) {
+      const code = clean(params.get('q') || params.get('code') || '');
+      if (code) return { type: 'answer', shareCode: code };
     }
 
-    // Check management token in path /manage/:token or param ?manage=
+    // Check management token in path /manage/:token or param ?manage= or hash #/manage/:token
     if (path.startsWith('/manage/')) {
-      const token = path.replace('/manage/', '').trim();
+      const token = clean(path.replace(/^\/manage\//, ''));
       if (token) return { type: 'manage', token };
     }
-    if (params.get('manage')) {
-      return { type: 'manage', token: params.get('manage')!.trim() };
+    if (hash.startsWith('#/manage/')) {
+      const token = clean(hash.replace(/^#\/manage\//, '').split('?')[0]);
+      if (token) return { type: 'manage', token };
+    }
+    if (params.get('manage') || params.get('token')) {
+      const token = clean(params.get('manage') || params.get('token') || '');
+      if (token) return { type: 'manage', token };
     }
 
-    if (path === '/create' || params.get('create') === 'true') {
+    if (path === '/create' || params.get('create') === 'true' || hash === '#/create') {
       return { type: 'create' };
     }
 

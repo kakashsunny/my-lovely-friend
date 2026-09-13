@@ -151,6 +151,22 @@ export const DatabaseStatusModal: React.FC<DatabaseStatusModalProps> = ({
               </div>
             </div>
 
+            {/* Vercel Deployment Checklist */}
+            <div className="p-3.5 rounded-2xl bg-purple-950/40 border border-purple-500/20 text-xs space-y-2">
+              <div className="flex items-center gap-1.5 text-purple-200 font-semibold">
+                <span>🚀 Vercel Deployment Checklist</span>
+              </div>
+              <p className="text-slate-300 leading-relaxed text-[11px]">
+                In your <strong className="text-white">Vercel Dashboard → Project Settings → Environment Variables</strong>:
+              </p>
+              <div className="p-2 rounded-lg bg-slate-950/80 font-mono text-[11px] text-pink-300 border border-white/10 break-all">
+                MONGODB_URI = &lt;your-mongodb-atlas-connection-string&gt;
+              </div>
+              <p className="text-[11px] text-purple-200/70 leading-relaxed">
+                This ensures your quizzes and your friends' responses are stored safely in the cloud and stay synchronized across all devices!
+              </p>
+            </div>
+
             {error && (
               <p className="text-xs text-rose-400 bg-rose-500/10 p-2.5 rounded-xl border border-rose-500/20">
                 {error}

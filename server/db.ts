@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import os from 'os';
 import { MongoClient, Db, Collection } from 'mongodb';
 
 export interface QuestionDoc {
@@ -83,20 +84,29 @@ class LocalBestieDatabase implements IBestieDatabase {
   private responsesMap = new Map<string, ResponseDoc>();
 
   constructor() {
-    this.dataDir = path.join(process.cwd(), '.data');
+    const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+    this.dataDir = isServerless ? path.join(os.tmpdir(), 'bestie_data') : path.join(process.cwd(), '.data');
     this.filePath = path.join(this.dataDir, 'bestie_db.json');
   }
 
   async init(): Promise<void> {
     try {
       if (!fs.existsSync(this.dataDir)) {
-        fs.mkdirSync(this.dataDir, { recursive: true });
+        try {
+          fs.mkdirSync(this.dataDir, { recursive: true });
+        } catch (dirErr) {
+          // If cwd is read-only (like Vercel lambda), switch dataDir to os.tmpdir()
+          this.dataDir = path.join(os.tmpdir(), 'bestie_data');
+          this.filePath = path.join(this.dataDir, 'bestie_db.json');
+          if (!fs.existsSync(this.dataDir)) {
+            fs.mkdirSync(this.dataDir, { recursive: true });
+          }
+        }
       }
 
       if (fs.existsSync(this.filePath)) {
         const raw = fs.readFileSync(this.filePath, 'utf-8');
         const parsed = JSON.parse(raw);
-        this.memory.quizzes = Array.isArray(parsed.quizzes) ? parsed.quizzes : [];
         this.memory.quizzes = (Array.isArray(parsed.quizzes) ? parsed.quizzes : [])
           .filter((q: QuizDoc) => q._id !== 'q_welcome_demo' && q.shareCode !== 'demo777');
         this.memory.responses = (Array.isArray(parsed.responses) ? parsed.responses : [])
@@ -108,10 +118,11 @@ class LocalBestieDatabase implements IBestieDatabase {
       }
 
       this.rebuildIndexes();
-      console.log(`[Bestie DB] Local persistent DB initialized. ${this.memory.quizzes.length} genuine quizzes, ${this.memory.responses.length} genuine responses.`);
+      console.log(`[Bestie DB] Local persistent DB initialized in ${this.dataDir}. ${this.memory.quizzes.length} genuine quizzes, ${this.memory.responses.length} genuine responses.`);
     } catch (err) {
       console.error('[Bestie DB] Error initializing local DB:', err);
       this.memory = { quizzes: [], responses: [] };
+      this.rebuildIndexes();
     }
   }
 
@@ -147,7 +158,17 @@ class LocalBestieDatabase implements IBestieDatabase {
       const data = JSON.stringify(this.memory, null, 2);
       fs.writeFileSync(this.filePath, data, 'utf-8');
     } catch (err) {
-      console.error('[Bestie DB] Error writing persistent file:', err);
+      try {
+        this.dataDir = path.join(os.tmpdir(), 'bestie_data');
+        this.filePath = path.join(this.dataDir, 'bestie_db.json');
+        if (!fs.existsSync(this.dataDir)) {
+          fs.mkdirSync(this.dataDir, { recursive: true });
+        }
+        const data = JSON.stringify(this.memory, null, 2);
+        fs.writeFileSync(this.filePath, data, 'utf-8');
+      } catch (fallbackErr) {
+        console.warn('[Bestie DB] File persistence bypassed in serverless container:', fallbackErr);
+      }
     }
   }
 
