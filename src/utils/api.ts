@@ -73,12 +73,14 @@ export async function safeFetchJson<T = any>(
       }
 
       let friendlyError = 'Unable to connect to the quiz service. Please try again in a moment.';
-      if (response.status === 404) {
+      if (rawText.includes('<!DOCTYPE') || rawText.includes('<html')) {
+        friendlyError = 'Backend API is currently offline on your host. If deploying on Vercel, please check your Vercel deployment log to ensure the build succeeded and no conflicting files exist.';
+      } else if (response.status === 404) {
         friendlyError = 'The requested quiz or service was not found. Please verify the link.';
       } else if (response.status === 504) {
-        friendlyError = 'Database connection timed out. If using MongoDB Atlas on Vercel, ensure Network Access allows 0.0.0.0/0.';
+        friendlyError = 'Database connection timed out. If using MongoDB Atlas, ensure Network Access allows 0.0.0.0/0.';
       } else if (response.status >= 500) {
-        friendlyError = 'Server is currently waking up or updating. Please try again in a few seconds.';
+        friendlyError = 'Server is currently starting up or updating. If you are on Vercel, please check your Vercel Dashboard to ensure your latest deployment build succeeded.';
       } else if (response.status === 403 || response.status === 401) {
         friendlyError = 'Permission denied. Please check your link or credentials.';
       }

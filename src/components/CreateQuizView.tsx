@@ -19,6 +19,7 @@ import { Question } from '../types.ts';
 import { DEFAULT_INITIAL_QUESTIONS, PRESET_CATEGORIES } from '../data/presetQuestions.ts';
 import { PreviewQuizModal } from './PreviewQuizModal.tsx';
 import { safeFetchJson } from '../utils/api.ts';
+import { publishQuizDirect } from '../services/clientFirestore.ts';
 
 interface CreateQuizViewProps {
   onPublishSuccess: (data: { shareCode: string; managementToken: string; title: string; questionsCount: number }) => void;
@@ -153,35 +154,59 @@ export const CreateQuizView: React.FC<CreateQuizViewProps> = ({ onPublishSuccess
     setErrorMessage(null);
 
     try {
-      const { ok, data, error } = await safeFetchJson<{
-        success: boolean;
+      let publishedData: {
         shareCode: string;
         managementToken: string;
-        error?: string;
-      }>('/api/quizzes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: title.trim(),
-          questions: questions.map((q, idx) => ({
-            id: q.id,
-            text: q.text.trim(),
-            position: idx + 1,
-            required: true,
-          })),
-        }),
-      });
+        title: string;
+        questionsCount: number;
+      } | null = null;
 
-      if (!ok || !data?.success) {
-        throw new Error(error || data?.error || 'Failed to publish quiz. Please try again.');
+      // 1. Try standard server API first
+      try {
+        const { ok, data } = await safeFetchJson<{
+          success: boolean;
+          shareCode: string;
+          managementToken: string;
+          error?: string;
+        }>('/api/quizzes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          retries: 1,
+          silent: true,
+          body: JSON.stringify({
+            title: title.trim(),
+            questions: questions.map((q, idx) => ({
+              id: q.id,
+              text: q.text.trim(),
+              position: idx + 1,
+              required: true,
+            })),
+          }),
+        });
+
+        if (ok && data?.success && data.shareCode) {
+          publishedData = {
+            shareCode: data.shareCode,
+            managementToken: data.managementToken,
+            title: title.trim(),
+            questionsCount: questions.length,
+          };
+        }
+      } catch (_) {}
+
+      // 2. If server API was unavailable or returned non-JSON, seamlessly fall back to direct Firestore
+      if (!publishedData) {
+        console.log('[CreateQuizView] Server endpoint unavailable, publishing directly to Firestore...');
+        const directResult = await publishQuizDirect(title, questions);
+        publishedData = {
+          shareCode: directResult.shareCode,
+          managementToken: directResult.managementToken,
+          title: title.trim(),
+          questionsCount: questions.length,
+        };
       }
 
-      onPublishSuccess({
-        shareCode: data.shareCode,
-        managementToken: data.managementToken,
-        title: title.trim(),
-        questionsCount: questions.length,
-      });
+      onPublishSuccess(publishedData);
     } catch (err: any) {
       console.error('Publish error:', err);
       setErrorMessage(err.message || 'Unable to publish quiz. Please try again in a moment.');

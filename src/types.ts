@@ -8,6 +8,7 @@ export interface Question {
 export interface QuizPublic {
   id: string;
   title: string;
+  shareCode?: string;
   questions: Question[];
   createdAt: string;
 }

@@ -19,6 +19,7 @@ import { QuizManagementData, QuizResponse } from '../types.ts';
 import { timeAgo, removeSavedCreatorQuiz } from '../utils/storage.ts';
 import { ResponseDetailModal } from './ResponseDetailModal.tsx';
 import { safeFetchJson } from '../utils/api.ts';
+import { getQuizManagementDirect, deleteQuizDirect } from '../services/clientFirestore.ts';
 
 interface ManagementViewProps {
   managementToken: string;
@@ -49,19 +50,40 @@ export const ManagementView: React.FC<ManagementViewProps> = ({
     setErrorMessage(null);
 
     try {
-      const { ok, data, error } = await safeFetchJson<{
-        success: boolean;
-        quiz: QuizManagementData;
-        responses: QuizResponse[];
-        error?: string;
-      }>(`/api/quizzes/manage/${encodeURIComponent(managementToken)}`);
+      let loadedQuiz: QuizManagementData | null = null;
+      let loadedResponses: QuizResponse[] = [];
 
-      if (!ok || !data?.success) {
-        throw new Error(error || data?.error || 'Failed to load quiz responses');
+      try {
+        const { ok, data } = await safeFetchJson<{
+          success: boolean;
+          quiz: QuizManagementData;
+          responses: QuizResponse[];
+          error?: string;
+        }>(`/api/quizzes/manage/${encodeURIComponent(managementToken)}`, {
+          retries: 1,
+          silent: true,
+        });
+
+        if (ok && data?.success && data.quiz) {
+          loadedQuiz = data.quiz;
+          loadedResponses = data.responses || [];
+        }
+      } catch (_) {}
+
+      // Fallback directly to Firestore if backend is offline/unreachable
+      if (!loadedQuiz) {
+        console.log('[ManagementView] Server unavailable, fetching directly from Firestore...');
+        const directData = await getQuizManagementDirect(managementToken);
+        loadedQuiz = directData.quiz as any;
+        loadedResponses = (directData.responses || []) as any;
       }
 
-      setQuiz(data.quiz);
-      setResponses(data.responses || []);
+      if (!loadedQuiz) {
+        throw new Error('Unable to access responses with this management link.');
+      }
+
+      setQuiz(loadedQuiz);
+      setResponses(loadedResponses);
     } catch (err: any) {
       console.error(err);
       setErrorMessage(err.message || 'Unable to access responses with this management link.');
@@ -108,13 +130,22 @@ export const ManagementView: React.FC<ManagementViewProps> = ({
   const handleDeleteQuiz = async () => {
     setIsDeletingQuiz(true);
     try {
-      const { ok, data, error } = await safeFetchJson<{ success: boolean; error?: string }>(
-        `/api/quizzes/manage/${encodeURIComponent(managementToken)}`,
-        { method: 'DELETE' }
-      );
-      if (!ok || !data?.success) {
-        throw new Error(error || data?.error || 'Failed to delete quiz');
+      let deleted = false;
+      try {
+        const { ok, data } = await safeFetchJson<{ success: boolean; error?: string }>(
+          `/api/quizzes/manage/${encodeURIComponent(managementToken)}`,
+          { method: 'DELETE', retries: 1, silent: true }
+        );
+        if (ok && data?.success) {
+          deleted = true;
+        }
+      } catch (_) {}
+
+      if (!deleted) {
+        await deleteQuizDirect(managementToken);
+        deleted = true;
       }
+
       removeSavedCreatorQuiz(managementToken);
       onGoHome();
     } catch (err: any) {

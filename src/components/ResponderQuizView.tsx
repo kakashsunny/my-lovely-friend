@@ -16,6 +16,7 @@ import {
 import { QuizPublic } from '../types.ts';
 import { validateAnswer, ValidationResult } from '../utils/answerValidator.ts';
 import { safeFetchJson } from '../utils/api.ts';
+import { getQuizByShareCodeDirect, submitResponseDirect } from '../services/clientFirestore.ts';
 
 interface ResponderQuizViewProps {
   shareCode: string;
@@ -53,14 +54,28 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
       setIsLoading(true);
       setFetchError(null);
       try {
-        const { ok, data, error } = await safeFetchJson<{ success: boolean; quiz: QuizPublic; error?: string }>(
-          `/api/quizzes/${encodeURIComponent(shareCode)}`
-        );
-        if (!ok || !data?.success || !data.quiz) {
-          throw new Error(error || data?.error || 'Quiz not found');
+        let loadedQuiz: QuizPublic | null = null;
+        try {
+          const { ok, data } = await safeFetchJson<{ success: boolean; quiz: QuizPublic; error?: string }>(
+            `/api/quizzes/${encodeURIComponent(shareCode)}`,
+            { retries: 1, silent: true }
+          );
+          if (ok && data?.success && data.quiz) {
+            loadedQuiz = data.quiz;
+          }
+        } catch (_) {}
+
+        // Fallback directly to Firestore if backend is offline/unreachable
+        if (!loadedQuiz) {
+          loadedQuiz = await getQuizByShareCodeDirect(shareCode);
         }
+
+        if (!loadedQuiz) {
+          throw new Error('Quiz not found. Please check your link.');
+        }
+
         if (isMounted) {
-          setQuiz(data.quiz);
+          setQuiz(loadedQuiz);
         }
       } catch (err: any) {
         if (isMounted) {
@@ -173,34 +188,56 @@ export const ResponderQuizView: React.FC<ResponderQuizViewProps> = ({
     try {
       const formattedAnswers = quiz.questions.map((q) => ({
         questionId: q.id,
+        questionText: q.text,
         answerText: answers[q.id] || '',
       }));
 
-      const { ok, data, error, questionId: errQId } = await safeFetchJson<{
-        success: boolean;
-        error?: string;
-        questionId?: string;
-        reason?: string;
-      }>(`/api/quizzes/${encodeURIComponent(shareCode)}/responses`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          responderName: responderName.trim(),
-          answers: formattedAnswers,
-        }),
-      });
+      let submitSuccess = false;
 
-      if (!ok || !data?.success) {
-        const targetQId = errQId || data?.questionId;
-        if (targetQId) {
+      // 1. Try server API first
+      try {
+        const { ok, data, error, questionId: errQId } = await safeFetchJson<{
+          success: boolean;
+          error?: string;
+          questionId?: string;
+          reason?: string;
+        }>(`/api/quizzes/${encodeURIComponent(shareCode)}/responses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          retries: 1,
+          silent: true,
+          body: JSON.stringify({
+            responderName: responderName.trim(),
+            answers: formattedAnswers.map((a) => ({
+              questionId: a.questionId,
+              answerText: a.answerText,
+            })),
+          }),
+        });
+
+        if (ok && data?.success) {
+          submitSuccess = true;
+        } else if (errQId || data?.questionId) {
+          const targetQId = errQId || data?.questionId;
           const targetIndex = quiz.questions.findIndex((q) => q.id === targetQId);
           if (targetIndex !== -1) {
             setCurrentQIndex(targetIndex);
             setStep('questions');
             triggerShake();
           }
+          throw new Error(error || data?.error || 'Please provide an authentic answer.');
         }
-        throw new Error(error || data?.error || 'Failed to submit responses. Please try again.');
+      } catch (apiErr: any) {
+        if (apiErr?.message?.includes('authentic') || apiErr?.message?.includes('bestie')) {
+          throw apiErr;
+        }
+      }
+
+      // 2. Fallback directly to Firestore if server is unreachable
+      if (!submitSuccess) {
+        console.log('[ResponderQuizView] Server unavailable, submitting directly to Firestore...');
+        await submitResponseDirect(shareCode, responderName.trim(), formattedAnswers);
+        submitSuccess = true;
       }
 
       setStep('sent');
