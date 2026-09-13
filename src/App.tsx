@@ -72,18 +72,20 @@ export default function App() {
   // Fetch real statistics from database
   const fetchStats = useCallback(async () => {
     try {
-      const { ok, data } = await safeFetchJson<PlatformStats & { success: boolean }>('/api/stats');
+      const { ok, data } = await safeFetchJson<PlatformStats & { success: boolean }>('/api/stats', { silent: true });
       if (ok && data && data.success) {
         setStats({
           totalQuizzes: data.totalQuizzes,
           totalResponses: data.totalResponses,
           dbProvider: data.dbProvider,
+          isConnectedToFirestore: data.isConnectedToFirestore,
+          isFirestoreConfigured: data.isFirestoreConfigured,
           isConnectedToMongo: data.isConnectedToMongo,
           isMongoConfigured: data.isMongoConfigured,
         });
       }
-    } catch (err) {
-      console.warn('Could not load stats', err);
+    } catch (_) {
+      // Ignored for background stats polling
     }
   }, []);
 
@@ -166,8 +168,8 @@ export default function App() {
         onOpenMyQuizzes={() => setShowMyQuizzesDrawer(true)}
       />
 
-      {/* Atlas Network Access Notification Banner (when MONGODB_URI is provided but Atlas IP Access is pending) */}
-      {stats?.isMongoConfigured && !stats?.isConnectedToMongo && !dismissedDbNotice && (
+      {/* Atlas Network Access Notification Banner (when MONGODB_URI is provided, not using Firestore, but Atlas IP Access is pending) */}
+      {stats?.dbProvider !== 'firestore' && stats?.isMongoConfigured && !stats?.isConnectedToMongo && !dismissedDbNotice && (
         <div className="relative z-30 max-w-5xl mx-auto w-full px-3 sm:px-6 lg:px-8 mb-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:px-4 sm:py-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs backdrop-blur-md shadow-lg shadow-amber-950/20">
             <div className="flex items-start sm:items-center gap-2.5">

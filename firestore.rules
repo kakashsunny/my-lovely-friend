@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    match /quizzes/{quizId} {
+      allow read: if true;
+      allow create: if isValidId(quizId)
+        && request.resource.data.keys().hasAll(['title', 'questions', 'shareCode', 'managementTokenHash', 'createdAt'])
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 200
+        && request.resource.data.shareCode is string
+        && request.resource.data.shareCode.size() <= 32
+        && request.resource.data.questions is list
+        && request.resource.data.questions.size() <= 100;
+      allow update, delete: if true;
+    }
+
+    match /responses/{responseId} {
+      allow read: if true;
+      allow create: if isValidId(responseId)
+        && request.resource.data.keys().hasAll(['quizId', 'responderName', 'answers', 'submittedAt'])
+        && request.resource.data.quizId is string
+        && request.resource.data.responderName is string
+        && request.resource.data.responderName.size() <= 100
+        && request.resource.data.answers is list
+        && request.resource.data.answers.size() <= 100;
+      allow update, delete: if true;
+    }
+  }
+}

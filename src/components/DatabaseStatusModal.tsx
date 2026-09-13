@@ -82,7 +82,7 @@ export const DatabaseStatusModal: React.FC<DatabaseStatusModalProps> = ({
             {/* Status Indicator Card */}
             <div
               className={`p-4 rounded-2xl border ${
-                status.isConnectedToMongo
+                status.provider === 'firestore' || status.isConnectedToMongo
                   ? 'bg-emerald-500/10 border-emerald-500/30'
                   : status.isMongoConfigured
                   ? 'bg-amber-500/10 border-amber-500/30'
@@ -90,26 +90,30 @@ export const DatabaseStatusModal: React.FC<DatabaseStatusModalProps> = ({
               }`}
             >
               <div className="flex items-start gap-3">
-                {status.isConnectedToMongo ? (
+                {status.provider === 'firestore' || status.isConnectedToMongo ? (
                   <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
                 ) : (
                   <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                 )}
                 <div>
                   <h3 className="font-semibold text-sm text-white">
-                    {status.isConnectedToMongo
+                    {status.provider === 'firestore'
+                      ? 'Firebase Firestore Cloud Database'
+                      : status.isConnectedToMongo
                       ? 'Connected to MongoDB Atlas'
                       : 'Built-in Document Storage (Active)'}
                   </h3>
                   <p className="text-xs text-slate-300/80 mt-1 leading-relaxed">
-                    {status.message}
+                    {status.provider === 'firestore'
+                      ? 'All quizzes and friends’ responses are stored in Google Cloud Firestore with real-time cloud persistence — no IP whitelist or manual connection string needed!'
+                      : status.message}
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* If Mongo URI is configured but rejected by Atlas Network Access */}
-            {status.isMongoConfigured && !status.isConnectedToMongo && (
+            {/* If Mongo URI is configured but rejected by Atlas Network Access and not on Firestore */}
+            {status.provider !== 'firestore' && status.isMongoConfigured && !status.isConnectedToMongo && (
               <div className="p-4 rounded-2xl bg-slate-950/60 border border-amber-500/20 text-xs space-y-2.5">
                 <p className="font-semibold text-amber-300">
                   👉 To connect your MongoDB Atlas cluster:
@@ -151,19 +155,16 @@ export const DatabaseStatusModal: React.FC<DatabaseStatusModalProps> = ({
               </div>
             </div>
 
-            {/* Vercel Deployment Checklist */}
+            {/* Cloud Persistence Details */}
             <div className="p-3.5 rounded-2xl bg-purple-950/40 border border-purple-500/20 text-xs space-y-2">
               <div className="flex items-center gap-1.5 text-purple-200 font-semibold">
-                <span>🚀 Vercel Deployment Checklist</span>
+                <ShieldCheck className="w-4 h-4 text-pink-400" />
+                <span>Zero-Maintenance Cloud Persistence</span>
               </div>
               <p className="text-slate-300 leading-relaxed text-[11px]">
-                In your <strong className="text-white">Vercel Dashboard → Project Settings → Environment Variables</strong>:
-              </p>
-              <div className="p-2 rounded-lg bg-slate-950/80 font-mono text-[11px] text-pink-300 border border-white/10 break-all">
-                MONGODB_URI = &lt;your-mongodb-atlas-connection-string&gt;
-              </div>
-              <p className="text-[11px] text-purple-200/70 leading-relaxed">
-                This ensures your quizzes and your friends' responses are stored safely in the cloud and stay synchronized across all devices!
+                {status.provider === 'firestore'
+                  ? 'Your Bestie quiz application is connected directly to Google Firebase Firestore. When deployed to Vercel or any serverless host, quizzes and responses remain automatically synchronized across all phones and laptops without any server configuration!'
+                  : 'Quizzes and answers are preserved continuously. You can connect Firebase Firestore or MongoDB Atlas for cloud-wide multi-device synchronization.'}
               </p>
             </div>
 

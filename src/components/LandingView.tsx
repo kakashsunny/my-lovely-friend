@@ -126,7 +126,14 @@ export const LandingView: React.FC<LandingViewProps> = ({
               </div>
               <span className="hidden sm:inline text-white/25">•</span>
               <div className="hidden sm:flex items-center gap-1 text-[11px] text-purple-300/70 font-medium">
-                <span>🔒 100% Private</span>
+                {stats.dbProvider === 'firestore' ? (
+                  <span className="text-emerald-300/90 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span>☁️ Cloud Sync</span>
+                  </span>
+                ) : (
+                  <span>🔒 100% Private</span>
+                )}
               </div>
             </>
           ) : (

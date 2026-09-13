@@ -1,0 +1,40 @@
+{
+  "entities": {
+    "quiz": {
+      "title": "Quiz",
+      "description": "A bestie quiz with custom questions and share code",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Quiz title" },
+        "questions": { "type": "array", "description": "Array of question objects" },
+        "shareCode": { "type": "string", "description": "Unique share code" },
+        "managementTokenHash": { "type": "string", "description": "Hash of management token" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation ISO date" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Update ISO date" }
+      },
+      "required": ["title", "questions", "shareCode", "managementTokenHash", "createdAt"]
+    },
+    "response": {
+      "title": "Response",
+      "description": "A response submitted by a friend",
+      "type": "object",
+      "properties": {
+        "quizId": { "type": "string", "description": "Quiz ID" },
+        "responderName": { "type": "string", "description": "Name of the respondent" },
+        "answers": { "type": "array", "description": "Array of answer objects" },
+        "submittedAt": { "type": "string", "format": "date-time", "description": "Submission ISO date" }
+      },
+      "required": ["quizId", "responderName", "answers", "submittedAt"]
+    }
+  },
+  "firestore": {
+    "/quizzes/{quizId}": {
+      "schema": "quiz",
+      "description": "Collection of all quizzes"
+    },
+    "/responses/{responseId}": {
+      "schema": "response",
+      "description": "Collection of all quiz answers submitted by friends"
+    }
+  }
+}

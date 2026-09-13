@@ -1,20 +1,23 @@
 import { app } from '../server/app.ts';
 import { getDatabase } from '../server/db.ts';
 
-// Cache database connection across warm serverless invocations
-let isDbReady = false;
+let dbInitPromise: Promise<any> | null = null;
+
 async function ensureDb() {
-  if (!isDbReady) {
-    try {
-      await getDatabase();
-      isDbReady = true;
-    } catch (err) {
-      console.error('[Bestie Vercel] Database initialization notice:', err);
-    }
+  if (!dbInitPromise) {
+    dbInitPromise = getDatabase().catch(err => {
+      console.warn('[Bestie Serverless] DB init notice:', err);
+      dbInitPromise = null;
+      return null;
+    });
   }
+  return dbInitPromise;
 }
 
 export default async function handler(req: any, res: any) {
-  await ensureDb();
+  try {
+    await ensureDb();
+  } catch (_) {}
   return app(req, res);
 }
+

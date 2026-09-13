@@ -2,7 +2,34 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import os from 'os';
+import { fileURLToPath } from 'url';
 import { MongoClient, Db, Collection } from 'mongodb';
+
+function getBaseDir(): string {
+  try {
+    if (typeof __dirname !== 'undefined' && __dirname) return __dirname;
+  } catch (_) {}
+  try {
+    const metaUrl = (import.meta as any)?.url;
+    if (metaUrl) {
+      return path.dirname(fileURLToPath(metaUrl));
+    }
+  } catch (_) {}
+  return process.cwd();
+}
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import {
+  getFirestore,
+  collection,
+  doc,
+  setDoc,
+  getDocs,
+  query,
+  where,
+  deleteDoc,
+  Firestore,
+  limit,
+} from 'firebase/firestore';
 
 export interface QuestionDoc {
   id: string;
@@ -40,9 +67,11 @@ export interface DatabaseStats {
 }
 
 export interface DatabaseStatusInfo {
-  provider: 'mongodb' | 'local';
-  isMongoConfigured: boolean;
-  isConnectedToMongo: boolean;
+  provider: 'firestore' | 'mongodb' | 'local';
+  isFirestoreConfigured?: boolean;
+  isConnectedToFirestore?: boolean;
+  isMongoConfigured?: boolean;
+  isConnectedToMongo?: boolean;
   message: string;
   fixGuide?: string;
   totalQuizzes: number;
@@ -300,6 +329,9 @@ class LocalBestieDatabase implements IBestieDatabase {
   }
 }
 
+let globalMongoClient: MongoClient | null = null;
+let globalIndexesCreated = false;
+
 // ---------------------------------------------------------------------------
 // Native MongoDB Driver Implementation (when MONGODB_URI is provided)
 // ---------------------------------------------------------------------------
@@ -310,13 +342,21 @@ class MongoBestieDatabase implements IBestieDatabase {
   private responsesCol!: Collection<ResponseDoc>;
 
   constructor(uri: string) {
-    this.client = new MongoClient(uri, {
-      serverSelectionTimeoutMS: 5000,
-      connectTimeoutMS: 5000,
-      socketTimeoutMS: 15000,
-      retryWrites: true,
-      maxPoolSize: 10,
-    });
+    const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+    if (globalMongoClient) {
+      this.client = globalMongoClient;
+    } else {
+      this.client = new MongoClient(uri, {
+        serverSelectionTimeoutMS: isServerless ? 2500 : 5000,
+        connectTimeoutMS: isServerless ? 2500 : 5000,
+        socketTimeoutMS: isServerless ? 5000 : 15000,
+        retryWrites: true,
+        maxPoolSize: isServerless ? 1 : 10,
+      });
+      if (isServerless) {
+        globalMongoClient = this.client;
+      }
+    }
   }
 
   async init(): Promise<void> {
@@ -326,32 +366,26 @@ class MongoBestieDatabase implements IBestieDatabase {
       this.quizzesCol = this.db.collection<QuizDoc>('quizzes');
       this.responsesCol = this.db.collection<ResponseDoc>('responses');
 
-      // Create required indexes: shareCode, managementTokenHash, quizId, submittedAt
-      await this.quizzesCol.createIndex({ shareCode: 1 }, { unique: true });
-      await this.quizzesCol.createIndex({ managementTokenHash: 1 });
-      await this.responsesCol.createIndex({ quizId: 1, submittedAt: -1 });
-      await this.responsesCol.createIndex({ submittedAt: -1 });
-
-      // Clean up any legacy demo / mock placeholder data from MongoDB so only genuine user quizzes & responses exist
-      try {
-        await this.quizzesCol.deleteMany({
-          $or: [{ _id: 'q_welcome_demo' }, { shareCode: 'demo777' }]
-        });
-        await this.responsesCol.deleteMany({
-          $or: [
-            { quizId: 'q_welcome_demo' },
-            { _id: { $in: ['resp_1', 'resp_2', 'resp_3'] } }
-          ]
-        });
-      } catch (cleanErr) {
-        console.warn('[Bestie DB] Note during demo cleanup in Mongo:', cleanErr);
+      // Create indexes once to avoid latency on repeated serverless cold starts
+      if (!globalIndexesCreated) {
+        try {
+          await this.quizzesCol.createIndex({ shareCode: 1 }, { unique: true });
+          await this.quizzesCol.createIndex({ managementTokenHash: 1 });
+          await this.responsesCol.createIndex({ quizId: 1, submittedAt: -1 });
+          await this.responsesCol.createIndex({ submittedAt: -1 });
+          globalIndexesCreated = true;
+        } catch (idxErr) {
+          console.warn('[Bestie DB] Index creation note:', idxErr);
+        }
       }
 
       console.log('[Bestie DB] Connected to MongoDB Atlas successfully with genuine records only.');
     } catch (err) {
-      try {
-        await this.client.close(true);
-      } catch (_) {}
+      if (!globalMongoClient) {
+        try {
+          await this.client.close(true);
+        } catch (_) {}
+      }
       throw err;
     }
   }
@@ -459,12 +493,164 @@ class MongoBestieDatabase implements IBestieDatabase {
 }
 
 // ---------------------------------------------------------------------------
-// Resilient Database Manager (Auto-switches to MongoDB, seamless local fallback)
+// Firebase Firestore Cloud Engine (Direct Cloud Persistence)
+// ---------------------------------------------------------------------------
+export class FirestoreBestieDatabase implements IBestieDatabase {
+  private db: Firestore;
+
+  constructor(config: any) {
+    const app = getApps().length > 0 ? getApp() : initializeApp(config);
+    this.db = getFirestore(app, config.firestoreDatabaseId || undefined);
+  }
+
+  async init(): Promise<void> {
+    const testQ = query(collection(this.db, 'quizzes'), limit(1));
+    await getDocs(testQ);
+  }
+
+  async createQuiz(data: { title: string; questions: QuestionDoc[]; shareCode: string; managementTokenHash: string }): Promise<QuizDoc> {
+    const now = new Date().toISOString();
+    const quizId = `q_${crypto.randomUUID().slice(0, 11)}`;
+    const docData: QuizDoc = {
+      _id: quizId,
+      title: data.title.trim(),
+      questions: data.questions,
+      shareCode: data.shareCode,
+      managementTokenHash: data.managementTokenHash,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await setDoc(doc(this.db, 'quizzes', quizId), docData);
+    return docData;
+  }
+
+  async findQuizByShareCode(shareCode: string): Promise<QuizDoc | null> {
+    const q = query(collection(this.db, 'quizzes'), where('shareCode', '==', shareCode), limit(1));
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    return snap.docs[0].data() as QuizDoc;
+  }
+
+  async findQuizByManagementHash(hash: string): Promise<QuizDoc | null> {
+    const q = query(collection(this.db, 'quizzes'), where('managementTokenHash', '==', hash), limit(1));
+    const snap = await getDocs(q);
+    if (snap.empty) return null;
+    return snap.docs[0].data() as QuizDoc;
+  }
+
+  async deleteQuiz(quizId: string): Promise<boolean> {
+    await deleteDoc(doc(this.db, 'quizzes', quizId));
+    try {
+      const q = query(collection(this.db, 'responses'), where('quizId', '==', quizId));
+      const snap = await getDocs(q);
+      const deletes = snap.docs.map(d => deleteDoc(doc(this.db, 'responses', d.id)));
+      await Promise.all(deletes);
+    } catch (_) {}
+    return true;
+  }
+
+  async createResponse(data: { quizId: string; responderName: string; answers: AnswerDoc[] }): Promise<ResponseDoc> {
+    const respId = `resp_${crypto.randomUUID().slice(0, 11)}`;
+    const now = new Date().toISOString();
+    const docData: ResponseDoc = {
+      _id: respId,
+      quizId: data.quizId,
+      responderName: data.responderName.trim(),
+      answers: data.answers,
+      submittedAt: now,
+    };
+    await setDoc(doc(this.db, 'responses', respId), docData);
+    return docData;
+  }
+
+  async getResponsesForQuiz(quizId: string): Promise<ResponseDoc[]> {
+    const q = query(collection(this.db, 'responses'), where('quizId', '==', quizId));
+    const snap = await getDocs(q);
+    const list = snap.docs.map(d => d.data() as ResponseDoc);
+    return list.sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
+  }
+
+  async deleteResponse(_quizId: string, responseId: string): Promise<boolean> {
+    await deleteDoc(doc(this.db, 'responses', responseId));
+    return true;
+  }
+
+  async getStats(): Promise<DatabaseStats> {
+    const [quizzesSnap, responsesSnap] = await Promise.all([
+      getDocs(collection(this.db, 'quizzes')),
+      getDocs(collection(this.db, 'responses')),
+    ]);
+    return {
+      totalQuizzes: quizzesSnap.size,
+      totalResponses: responsesSnap.size,
+    };
+  }
+
+  async getStatus(): Promise<DatabaseStatusInfo> {
+    const stats = await this.getStats();
+    return {
+      provider: 'firestore',
+      isFirestoreConfigured: true,
+      isConnectedToFirestore: true,
+      message: 'Connected to Firebase Firestore Cloud Database',
+      totalQuizzes: stats.totalQuizzes,
+      totalResponses: stats.totalResponses,
+    };
+  }
+
+  async upsertQuiz(quiz: QuizDoc): Promise<void> {
+    await setDoc(doc(this.db, 'quizzes', quiz._id), quiz);
+  }
+
+  async upsertResponse(resp: ResponseDoc): Promise<void> {
+    await setDoc(doc(this.db, 'responses', resp._id), resp);
+  }
+
+  async reconnectMongo(): Promise<boolean> {
+    return true;
+  }
+}
+
+function loadFirebaseConfig(): any {
+  if (process.env.FIREBASE_CONFIG) {
+    try {
+      return JSON.parse(process.env.FIREBASE_CONFIG);
+    } catch (_) {}
+  }
+  const baseDir = getBaseDir();
+  const possiblePaths = [
+    path.join(process.cwd(), 'firebase-applet-config.json'),
+    path.join(baseDir, '..', 'firebase-applet-config.json'),
+    path.join(baseDir, 'firebase-applet-config.json'),
+  ];
+  for (const p of possiblePaths) {
+    try {
+      if (fs.existsSync(p)) {
+        return JSON.parse(fs.readFileSync(p, 'utf8'));
+      }
+    } catch (_) {}
+  }
+  return {
+    projectId: "gen-lang-client-0928069600",
+    appId: "1:352732315322:web:537ac9d2c524968bba8c83",
+    apiKey: "AIzaSyDEe5ijNjK-lLkJYYOHAaOxz1a4S0LiV28",
+    authDomain: "gen-lang-client-0928069600.firebaseapp.com",
+    firestoreDatabaseId: "ai-studio-bestie-8940a001-204f-471e-a965-b21e8e50073a",
+    storageBucket: "gen-lang-client-0928069600.firebasestorage.app",
+    messagingSenderId: "352732315322",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Resilient Database Manager (Firebase Firestore Primary, local zero-downtime)
 // ---------------------------------------------------------------------------
 export class ResilientBestieDatabase implements IBestieDatabase {
   private localDb: LocalBestieDatabase;
+  private firestoreDb: FirestoreBestieDatabase | null = null;
   private mongoDb: MongoBestieDatabase | null = null;
   private activeDb: IBestieDatabase;
+  private isFirestoreConfigured = false;
+  private isConnectedToFirestore = false;
   private isMongoConfigured = false;
   private isConnectedToMongo = false;
   private lastError: string | null = null;
@@ -482,24 +668,80 @@ export class ResilientBestieDatabase implements IBestieDatabase {
     await this.localDb.init();
     this.activeDb = this.localDb;
 
-    // 2. Attempt connection to MongoDB if configured
+    // 2. Connect to Firebase Firestore (primary cloud database)
+    const fbConnected = await this.tryConnectFirestore();
+    if (fbConnected) {
+      return;
+    }
+
+    // 3. Attempt connection to MongoDB if configured
     const connected = await this.tryConnectMongo(false);
     if (!connected && this.isMongoConfigured) {
-      // Auto retry every 45s in background so when user whitelists IP in Atlas, it connects automatically
       this.startAutoRetry();
     }
   }
 
+  async tryConnectFirestore(): Promise<boolean> {
+    try {
+      const fbConfig = loadFirebaseConfig();
+      if (!fbConfig || !fbConfig.projectId) {
+        this.isFirestoreConfigured = false;
+        return false;
+      }
+      this.isFirestoreConfigured = true;
+      console.log('[Bestie DB] Initializing Firebase Firestore Cloud Database...');
+      const candidate = new FirestoreBestieDatabase(fbConfig);
+      await candidate.init();
+
+      // Sync existing quizzes & responses so user data is never lost
+      try {
+        const localQuizzes = this.localDb.getAllQuizzes();
+        const localResponses = this.localDb.getAllResponses();
+        if (localQuizzes.length > 0) {
+          console.log(`[Bestie DB] Syncing ${localQuizzes.length} quiz(zes) to Firestore...`);
+          for (const q of localQuizzes) {
+            await candidate.upsertQuiz(q);
+          }
+        }
+        if (localResponses.length > 0) {
+          console.log(`[Bestie DB] Syncing ${localResponses.length} response(s) to Firestore...`);
+          for (const r of localResponses) {
+            await candidate.upsertResponse(r);
+          }
+        }
+      } catch (syncErr) {
+        console.warn('[Bestie DB] Note during initial sync to Firestore:', syncErr);
+      }
+
+      this.firestoreDb = candidate;
+      this.activeDb = candidate;
+      this.isConnectedToFirestore = true;
+      console.log('[Bestie DB] ✅ Live connection to Firebase Firestore active! ☁️');
+      return true;
+    } catch (err: any) {
+      console.warn('[Bestie DB] Firestore connection attempt:', err?.message || err);
+      this.isConnectedToFirestore = false;
+      return false;
+    }
+  }
+
   private startAutoRetry() {
+    // In serverless environments (e.g. Vercel), background intervals prevent the function from completing and trigger 504 timeouts
+    const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+    if (isServerless) return;
+
     if (this.autoRetryTimer) clearInterval(this.autoRetryTimer);
     this.autoRetryTimer = setInterval(async () => {
-      if (!this.isConnectedToMongo && this.isMongoConfigured) {
+      if (!this.isConnectedToFirestore && !this.isConnectedToMongo && this.isMongoConfigured) {
         await this.tryConnectMongo(true);
-      } else if (this.isConnectedToMongo && this.autoRetryTimer) {
+      } else if ((this.isConnectedToFirestore || this.isConnectedToMongo) && this.autoRetryTimer) {
         clearInterval(this.autoRetryTimer);
         this.autoRetryTimer = null;
       }
     }, 45000);
+    if (this.autoRetryTimer && typeof (this.autoRetryTimer as any).unref === 'function') {
+      (this.autoRetryTimer as any).unref();
+    }
   }
 
   async tryConnectMongo(isBackgroundRetry = false): Promise<boolean> {
@@ -511,7 +753,6 @@ export class ResilientBestieDatabase implements IBestieDatabase {
       if (!rawUri || !rawUri.trim()) {
         this.isMongoConfigured = false;
         this.isConnectedToMongo = false;
-        this.activeDb = this.localDb;
         return false;
       }
 
@@ -525,7 +766,6 @@ export class ResilientBestieDatabase implements IBestieDatabase {
       const candidate = new MongoBestieDatabase(uri);
       await candidate.init();
 
-      // Successfully connected! Sync any quizzes/responses saved locally
       try {
         const localQuizzes = this.localDb.getAllQuizzes();
         const localResponses = this.localDb.getAllResponses();
@@ -548,7 +788,9 @@ export class ResilientBestieDatabase implements IBestieDatabase {
         await this.mongoDb.close();
       }
       this.mongoDb = candidate;
-      this.activeDb = candidate;
+      if (!this.isConnectedToFirestore) {
+        this.activeDb = candidate;
+      }
       this.isConnectedToMongo = true;
       this.lastError = null;
       this.lastFixGuide = null;
@@ -556,38 +798,8 @@ export class ResilientBestieDatabase implements IBestieDatabase {
       return true;
     } catch (err: any) {
       const errMsg = err?.message || String(err);
-      const isSslAlert80 = errMsg.includes('SSL alert number 80') || errMsg.includes('tlsv1 alert internal error') || errMsg.includes('alert number 80');
-
-      if (isSslAlert80) {
-        this.lastError = 'MongoDB Atlas rejected connection: IP not allowed in Network Access list.';
-        this.lastFixGuide = 'In MongoDB Atlas (cloud.mongodb.com): Go to "Network Access" -> "+ Add IP Address" -> click "Allow Access From Anywhere" (0.0.0.0/0) -> Confirm.';
-        if (!isBackgroundRetry) {
-          console.log(
-            '\n' +
-            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-            '⚠️  [Bestie DB] MongoDB Atlas Network Access Required:\n' +
-            'MongoDB Atlas rejected the TLS connection (SSL Alert 80).\n' +
-            'Why: Cloud Run uses dynamic outbound IPs which Atlas blocks by default.\n' +
-            'How to fix (Takes 30 seconds):\n' +
-            '  1. Open MongoDB Atlas (https://cloud.mongodb.com)\n' +
-            '  2. Go to "Network Access" under Security in the left sidebar\n' +
-            '  3. Click "+ Add IP Address"\n' +
-            '  4. Click "Allow Access From Anywhere" (0.0.0.0/0) and click Confirm\n' +
-            '🛡️  Zero Downtime: Bestie is running on its built-in persistent store.\n' +
-            '   Quizzes, answers & management work smoothly right now without loss!\n' +
-            '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n'
-          );
-        }
-      } else {
-        this.lastError = errMsg;
-        this.lastFixGuide = 'Please check your MONGODB_URI username and password in MongoDB Atlas.';
-        if (!isBackgroundRetry) {
-          console.warn('[Bestie DB] Notice: MongoDB connection issue, using local persistent store:', errMsg);
-        }
-      }
-
+      this.lastError = errMsg;
       this.isConnectedToMongo = false;
-      this.activeDb = this.localDb;
       return false;
     } finally {
       this.isReconnecting = false;
@@ -595,19 +807,30 @@ export class ResilientBestieDatabase implements IBestieDatabase {
   }
 
   async reconnectMongo(): Promise<boolean> {
+    if (this.isFirestoreConfigured) {
+      const fb = await this.tryConnectFirestore();
+      if (fb) return true;
+    }
     return this.tryConnectMongo(false);
   }
 
   async getStatus(): Promise<DatabaseStatusInfo> {
     const stats = await this.activeDb.getStats();
+    const provider = this.isConnectedToFirestore
+      ? 'firestore'
+      : this.isConnectedToMongo
+      ? 'mongodb'
+      : 'local';
     return {
-      provider: this.isConnectedToMongo ? 'mongodb' : 'local',
+      provider,
+      isFirestoreConfigured: this.isFirestoreConfigured,
+      isConnectedToFirestore: this.isConnectedToFirestore,
       isMongoConfigured: this.isMongoConfigured,
       isConnectedToMongo: this.isConnectedToMongo,
-      message: this.isConnectedToMongo
+      message: this.isConnectedToFirestore
+        ? 'Connected to Firebase Firestore Cloud Database'
+        : this.isConnectedToMongo
         ? 'Connected to MongoDB Atlas'
-        : this.isMongoConfigured
-        ? 'Running on Built-in Persistent DB (MongoDB Atlas IP Access Pending)'
         : 'Running on Built-in Persistent DB',
       fixGuide: this.lastFixGuide || undefined,
       totalQuizzes: stats.totalQuizzes,

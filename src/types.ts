@@ -43,9 +43,11 @@ export interface SavedCreatorQuiz {
 }
 
 export interface DatabaseStatusInfo {
-  provider: 'mongodb' | 'local';
-  isMongoConfigured: boolean;
-  isConnectedToMongo: boolean;
+  provider: 'firestore' | 'mongodb' | 'local';
+  isFirestoreConfigured?: boolean;
+  isConnectedToFirestore?: boolean;
+  isMongoConfigured?: boolean;
+  isConnectedToMongo?: boolean;
   message: string;
   fixGuide?: string;
   totalQuizzes: number;
@@ -55,7 +57,9 @@ export interface DatabaseStatusInfo {
 export interface PlatformStats {
   totalQuizzes: number;
   totalResponses: number;
-  dbProvider?: 'mongodb' | 'local';
+  dbProvider?: 'firestore' | 'mongodb' | 'local';
+  isConnectedToFirestore?: boolean;
+  isFirestoreConfigured?: boolean;
   isConnectedToMongo?: boolean;
   isMongoConfigured?: boolean;
 }

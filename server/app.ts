@@ -72,6 +72,8 @@ apiRouter.get('/stats', async (req, res) => {
       totalQuizzes: stats.totalQuizzes,
       totalResponses: stats.totalResponses,
       dbProvider: dbStatus.provider,
+      isConnectedToFirestore: dbStatus.isConnectedToFirestore,
+      isFirestoreConfigured: dbStatus.isFirestoreConfigured,
       isConnectedToMongo: dbStatus.isConnectedToMongo,
       isMongoConfigured: dbStatus.isMongoConfigured,
     });
