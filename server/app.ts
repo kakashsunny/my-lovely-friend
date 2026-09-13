@@ -6,8 +6,8 @@ import {
   generateToken,
   hashToken,
   QuestionDoc,
-} from './db.ts';
-import { validateAnswer } from '../src/utils/answerValidator.ts';
+} from './db';
+import { validateAnswer } from '../src/utils/answerValidator';
 
 dotenv.config();
 

@@ -1,5 +1,5 @@
-import { app } from '../server/app.ts';
-import { getDatabase } from '../server/db.ts';
+import { app } from '../server/app';
+import { getDatabase } from '../server/db';
 
 let dbInitPromise: Promise<any> | null = null;
 
